@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 MODEL_PATH = os.getenv("MODEL_PATH", "model/model.joblib")
 META_PATH = os.getenv("META_PATH", "model/metadata.json")
-MAX_BATCH = 1000
+MAX_BATCH = 2000
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("fraud-api")
