@@ -1,0 +1,128 @@
+name: ci
+
+# When does this workflow run?
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:          # adds a "Run workflow" button in the Actions tab
+
+# The workflow gets read-only access to the repository unless a job asks for more.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older run that is still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Validate data
+        run: python ci/validate_data.py data/transactions.csv
+
+      - name: Train model
+        run: python train.py --data data/transactions.csv --out model
+
+      - name: Model quality gate
+        run: python ci/quality_gate.py
+
+      - name: Run tests
+        run: python -m pytest -q --junitxml=test-results.xml
+
+      - name: Keep the trained model for the image job
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v6
+        with:
+          name: model
+          path: |
+            model/
+            metrics.json
+          retention-days: 14
+
+      - name: Keep the test report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results-py${{ matrix.python-version }}
+          path: test-results.xml
+
+  image:
+    name: build and smoke-test the image
+    needs: test                       # runs only if every test job passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write                 # needed to push to GitHub Container Registry
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download the model the test job trained
+        uses: actions/download-artifact@v4
+        with:
+          name: model
+          path: .
+
+      - name: Build the image
+        run: docker build -t fraud-api:ci .
+
+      - name: Start the container
+        run: docker run -d --name fraud-api -p 8000:8000 fraud-api:ci
+
+      - name: Wait until the service is healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "service did not become healthy" && exit 1
+
+      - name: Smoke test the running container
+        run: python ci/smoke_test.py http://localhost:8000
+
+      - name: Show container logs if something failed
+        if: failure()
+        run: docker logs fraud-api
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the image (main branch and version tags only)
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}
+          docker tag fraud-api:ci $IMAGE:sha-${GITHUB_SHA::7}
+          docker push $IMAGE:sha-${GITHUB_SHA::7}
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            docker tag fraud-api:ci $IMAGE:${GITHUB_REF_NAME}
+            docker push $IMAGE:${GITHUB_REF_NAME}
+          fi
