@@ -1,0 +1,35 @@
+{
+  "validation": {
+    "precision": 0.176,
+    "recall": 0.743,
+    "f1": 0.284,
+    "n": 600,
+    "n_fraud": 35
+  },
+  "test": {
+    "precision": 0.139,
+    "recall": 0.676,
+    "f1": 0.231,
+    "n": 600,
+    "n_fraud": 34
+  },
+  "slices": {
+    "foreign": {
+      "precision": 0.231,
+      "recall": 0.857,
+      "f1": 0.364,
+      "n": 81,
+      "n_fraud": 14
+    },
+    "domestic": {
+      "precision": 0.097,
+      "recall": 0.55,
+      "f1": 0.165,
+      "n": 519,
+      "n_fraud": 20
+    }
+  },
+  "rows": 3000,
+  "fraud_rate": 0.0573,
+  "data_md5": "68861e2129ed6530b1df6abf49539a74"
+}
